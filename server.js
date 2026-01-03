@@ -39,12 +39,17 @@
 //   console.log(`Server running on port ${PORT}`);
 // });
 
+
+
+
+
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+// Railway uses PORT from environment, fallback to 8080
+const PORT = process.env.PORT || 8080;
 
 // Trust proxy
 app.set('trust proxy', 1);
@@ -125,27 +130,43 @@ const startServer = async () => {
     console.log('Starting PasteBin Lite Server...');
     console.log('=================================');
     
-    // Start server FIRST (don't wait for DB)
+    // Start server on 0.0.0.0 to accept connections from Railway
     const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`✓ Server listening on port ${PORT}`);
+      console.log(`✓ Server accessible at http://0.0.0.0:${PORT}`);
       console.log(`✓ Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log('=================================');
     });
 
-    // Then connect to database in background
-    connectDB().catch(err => {
-      console.error('✗ Database connection failed:', err.message);
-      console.log('⚠ Server will continue running without database');
-    });
+    // Connect to database in background (non-blocking)
+    connectDB()
+      .then(() => console.log('✓ Database ready'))
+      .catch(err => {
+        console.error('✗ Database connection failed:', err.message);
+        console.log('⚠ Server will continue running without database');
+      });
 
     // Handle server errors
     server.on('error', (error) => {
-      console.error('Server error:', error);
+      if (error.code === 'EADDRINUSE') {
+        console.error(`✗ Port ${PORT} is already in use`);
+      } else {
+        console.error('✗ Server error:', error);
+      }
       process.exit(1);
     });
 
+    // Graceful shutdown
+    process.on('SIGTERM', () => {
+      console.log('SIGTERM received, shutting down gracefully');
+      server.close(() => {
+        console.log('Server closed');
+        process.exit(0);
+      });
+    });
+
   } catch (error) {
-    console.error('Failed to start server:', error);
+    console.error('✗ Failed to start server:', error);
     process.exit(1);
   }
 };
