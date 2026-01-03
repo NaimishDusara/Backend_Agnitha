@@ -92,7 +92,7 @@ const connectDB = require('./src/config/db');
 // Import routes AFTER app is created
 let pasteRoutes;
 try {
-  pasteRoutes = require('./routes/paste');
+  pasteRoutes = require('./src/routes/paste');
   app.use('/', pasteRoutes);
   console.log('✓ Routes loaded successfully');
 } catch (error) {
