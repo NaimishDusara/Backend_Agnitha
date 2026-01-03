@@ -39,25 +39,17 @@
 //   console.log(`Server running on port ${PORT}`);
 // });
 
-
-
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
-const connectDB = require('./config/db');
-const pasteRoutes = require('./routes/paste');
-
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Connect to MongoDB
-connectDB();
-
-// Trust proxy for Railway/Vercel
+// Trust proxy
 app.set('trust proxy', 1);
 
-// Middleware
+// Middleware - BEFORE routes
 app.use(cors({
   origin: '*',
   credentials: true
@@ -65,21 +57,26 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Log requests (for debugging)
+// Request logger
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
 });
 
-// Routes
-app.use('/', pasteRoutes);
+// Simple health check - NO database dependency
+app.get('/api/healthz', (req, res) => {
+  console.log('Health check called');
+  res.status(200).json({ ok: true });
+});
 
-// Root route
+// Root route - NO database dependency
 app.get('/', (req, res) => {
-  res.json({ 
+  console.log('Root route called');
+  res.status(200).json({ 
     message: 'PasteBin Lite API',
     status: 'running',
     version: '1.0.0',
+    port: PORT,
     endpoints: {
       health: 'GET /api/healthz',
       createPaste: 'POST /api/pastes',
@@ -89,29 +86,78 @@ app.get('/', (req, res) => {
   });
 });
 
+// Import database connection
+const connectDB = require('./src/config/db');
+
+// Import routes AFTER app is created
+let pasteRoutes;
+try {
+  pasteRoutes = require('./routes/paste');
+  app.use('/', pasteRoutes);
+  console.log('✓ Routes loaded successfully');
+} catch (error) {
+  console.error('✗ Failed to load routes:', error.message);
+}
+
 // 404 handler
 app.use((req, res) => {
-  console.log(`404 Not Found: ${req.method} ${req.url}`);
+  console.log(`404: ${req.method} ${req.url}`);
   res.status(404).json({ 
     error: 'Route not found',
-    path: req.url,
-    method: req.method
+    path: req.url
   });
 });
 
 // Error handler
 app.use((err, req, res, next) => {
-  console.error('Server error:', err);
+  console.error('Error:', err.message);
+  console.error(err.stack);
   res.status(500).json({ 
     error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined
+    message: process.env.NODE_ENV === 'production' ? 'Something went wrong' : err.message
   });
 });
 
-// Start server
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`=================================`);
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`=================================`);
+// Start server function
+const startServer = async () => {
+  try {
+    console.log('=================================');
+    console.log('Starting PasteBin Lite Server...');
+    console.log('=================================');
+    
+    // Start server FIRST (don't wait for DB)
+    const server = app.listen(PORT, '0.0.0.0', () => {
+      console.log(`✓ Server listening on port ${PORT}`);
+      console.log(`✓ Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log('=================================');
+    });
+
+    // Then connect to database in background
+    connectDB().catch(err => {
+      console.error('✗ Database connection failed:', err.message);
+      console.log('⚠ Server will continue running without database');
+    });
+
+    // Handle server errors
+    server.on('error', (error) => {
+      console.error('Server error:', error);
+      process.exit(1);
+    });
+
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+// Handle uncaught errors
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
 });
+
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled Rejection:', error);
+});
+
+// Start the server
+startServer();
